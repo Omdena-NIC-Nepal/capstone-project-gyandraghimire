@@ -1,5 +1,8 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/HTantjLn)
-﻿# Project Title: Climate Change Impact Assessment and Prediction System for Nepal
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://omdena-nic-nepal-capstone-project-gyandraghimire.streamlit.app)
+
+# Project Title: Climate Change Impact Assessment and Prediction System for Nepal
 
 ### Project Goal: 
 - Develop an end-to-end data analysis system that monitors, analyzes, and predicts climate change impacts in Nepal with a focus on vulnerable regions
