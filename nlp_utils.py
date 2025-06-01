@@ -1,98 +1,129 @@
 # nlp_utils.py 🔤 NLP Utilities for Climate News Analysis
 
 import requests
+import logging
+import nltk
+import pandas as pd
 from bs4 import BeautifulSoup
 from transformers import pipeline
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from nltk.corpus import stopwords
-import nltk
 
-# Ensure stopwords are available
-nltk.download('stopwords')
+# --- Setup ---
+nltk.download('stopwords', quiet=True)
+stop_words = set(stopwords.words('english'))
+logging.basicConfig(level=logging.INFO, format="🔍 %(message)s")
 
-# --- Pipelines ---
+# --- Load HuggingFace Transformers Pipelines ---
 sentiment_en = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 ner = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english", aggregation_strategy="simple")
 summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-# --- Article Scraper ---
+# --- Web Article Fetcher ---
 def fetch_articles(urls):
+    """
+    Scrape article text from a list of URLs.
+    Returns a list of raw article texts.
+    """
     articles = []
     for url in urls:
         try:
-            print(f"🔄 Fetching: {url}")
+            logging.info(f"📡 Fetching: {url}")
             res = requests.get(url, timeout=10)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            paragraphs = soup.find_all('p')
-            text = ' '.join([p.text for p in paragraphs])
-            articles.append(text)
+            soup = BeautifulSoup(res.text, "html.parser")
+            text = " ".join([p.get_text() for p in soup.find_all("p")])
+            articles.append(text.strip())
         except Exception as e:
-            print(f"⚠️ Error fetching {url}: {e}")
+            logging.warning(f"⚠️ Failed to fetch {url}: {e}")
+            articles.append("")  # Keep index alignment
     return articles
 
 # --- Sentiment Analysis ---
 def analyze_sentiment(texts):
-    return [sentiment_en(t[:512])[0] for t in texts]
+    """
+    Run sentiment analysis on a list of texts.
+    Truncates each text to 512 characters.
+    """
+    return [sentiment_en(t[:512])[0] if t.strip() else {} for t in texts]
 
 # --- Named Entity Recognition ---
 def extract_entities(texts):
-    return [ner(t[:512]) for t in texts]
+    """
+    Extract named entities from a list of texts.
+    Truncates each text to 512 characters.
+    """
+    return [ner(t[:512]) if t.strip() else [] for t in texts]
 
 # --- Summarization ---
 def summarize_texts(texts):
-    return [summarizer(t[:1024])[0]['summary_text'] for t in texts]
-
-# --- Topic Modeling using LDA ---
-def topic_modeling_sklearn(docs, num_topics=5, num_words=10):
-    if len(docs) < 2:
-        return ["⚠️ Not enough documents for topic modeling (need ≥2)."]
-
-    stop_words = set(stopwords.words('english'))
-    processed_docs = [
-        ' '.join([w for w in doc.lower().split() if w.isalpha() and w not in stop_words])
-        for doc in docs
+    """
+    Generate summaries for each input text.
+    Truncates each text to 1024 characters.
+    """
+    return [
+        summarizer(t[:1024])[0]["summary_text"] if t.strip() else "⚠️ No content to summarize."
+        for t in texts
     ]
 
-    # Adjust min_df for small document sets
-    min_df = 1 if len(docs) < 5 else 2
+# --- Topic Modeling with LDA ---
+def topic_modeling_sklearn(docs, num_topics=5, num_words=10):
+    """
+    Extract topics from text using sklearn's LDA.
+    Returns a list of topic strings.
+    """
+    valid_docs = [doc for doc in docs if doc.strip()]
+    if len(valid_docs) < 2:
+        return ["⚠️ Not enough valid documents for topic modeling."]
+
+    cleaned_docs = [
+        " ".join([word for word in doc.lower().split() if word.isalpha() and word not in stop_words])
+        for doc in valid_docs
+    ]
+
+    min_df = 1 if len(valid_docs) < 5 else 2
 
     try:
-        vectorizer = CountVectorizer(max_df=0.95, min_df=min_df, stop_words='english')
-        doc_term_matrix = vectorizer.fit_transform(processed_docs)
-    except ValueError as e:
-        return [f"⚠️ Topic model error: {str(e)}"]
+        vectorizer = CountVectorizer(max_df=0.95, min_df=min_df, stop_words="english")
+        doc_term_matrix = vectorizer.fit_transform(cleaned_docs)
+        words = vectorizer.get_feature_names_out()
+    except Exception as e:
+        return [f"⚠️ Vectorizer error: {e}"]
 
-    # Fit LDA model
-    n_topics = min(num_topics, doc_term_matrix.shape[0])
-    lda_model = LatentDirichletAllocation(n_components=n_topics, random_state=42)
-    lda_model.fit(doc_term_matrix)
+    try:
+        n_topics = min(num_topics, doc_term_matrix.shape[0])
+        lda = LatentDirichletAllocation(n_components=n_topics, random_state=42)
+        lda.fit(doc_term_matrix)
+    except Exception as e:
+        return [f"⚠️ LDA model error: {e}"]
 
-    words = vectorizer.get_feature_names_out()
     topics = []
-    for idx, topic in enumerate(lda_model.components_):
-        top_words = [words[i] for i in topic.argsort()[:-num_words - 1:-1]]
-        topics.append(f"Topic {idx + 1}: " + ", ".join(top_words))
+    for idx, topic_weights in enumerate(lda.components_):
+        top_terms = [words[i] for i in topic_weights.argsort()[:-num_words - 1:-1]]
+        topics.append(f"🔹 Topic {idx + 1}: " + ", ".join(top_terms))
     return topics
 
-# --- Full NLP Pipeline ---
-def run_nlp_pipeline(urls):
-    if not urls:
-        raise ValueError("⚠️ No URLs provided.")
+# --- Unified NLP Execution ---
+def run_nlp_pipeline(urls=None, texts=None):
+    """
+    Unified NLP runner for URLs or preloaded texts.
+    Returns dict of results: texts, sentiments, summaries, NER, and topics.
+    """
+    if urls:
+        texts = fetch_articles(urls)
+    elif not texts:
+        raise ValueError("❗ You must provide either URLs or text content.")
 
-    texts = fetch_articles(urls)
-    if not any(texts):
-        raise ValueError("⚠️ No valid article content fetched.")
+    valid_texts = [t for t in texts if t.strip()]
+    if not valid_texts:
+        raise ValueError("⚠️ No valid textual content found.")
 
-    sentiments = analyze_sentiment(texts)
-    entities = extract_entities(texts)
-    summaries = summarize_texts(texts)
-    topics = topic_modeling_sklearn(texts)
+    logging.info("🚀 Running NLP pipeline...")
 
     return {
-        'texts': texts,
-        'sentiments': sentiments,
-        'entities': entities,
-        'summaries': summaries,
-        'topics': topics
+        "texts": texts,
+        "sentiments": analyze_sentiment(valid_texts),
+        "entities": extract_entities(valid_texts),
+        "summaries": summarize_texts(valid_texts),
+        "topics": topic_modeling_sklearn(valid_texts)
     }

@@ -15,79 +15,97 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 
-# --- Classification Model Trainer ---
-def train_classifier(X, y, model_type='random_forest', model_name='model', save_path='data/processed'):
-    model_map = {
-        'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
-        'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42)
-    }
 
-    model = model_map.get(model_type)
-    if not model:
-        raise ValueError(f"Unsupported classifier: {model_type}")
+# --- Model Registry ---
+CLASSIFIERS = {
+    'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
+    'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42)
+}
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.25, random_state=42
-    )
+REGRESSORS = {
+    'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
+    'gradient_boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
+    'linear_regression': LinearRegression(),
+    'ridge': Ridge(alpha=1.0),
+    'lasso': Lasso(alpha=0.1)
+}
 
+
+# --- Classification Trainer ---
+def train_classifier(X, y, model_type='random_forest', model_name='classifier', save_path='data/processed'):
+    """
+    Train and evaluate a classification model.
+    """
+    if model_type not in CLASSIFIERS:
+        raise ValueError(f"Unsupported classifier: {model_type}. Choose from {list(CLASSIFIERS.keys())}")
+
+    model = CLASSIFIERS[model_type]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.25, random_state=42)
+
+    print(f"🔁 Training classifier: {model_type}")
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 
+    # Evaluation
+    acc = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-    accuracy = accuracy_score(y_test, y_pred)
-    confusion = confusion_matrix(y_test, y_pred)
-    cv = cross_val_score(model, X, y, cv=5, scoring='accuracy')
+    matrix = confusion_matrix(y_test, y_pred)
+    cv_scores = cross_val_score(model, X, y, cv=5, scoring='accuracy')
 
+    # Save model
     Path(save_path).mkdir(parents=True, exist_ok=True)
-    model_file = f"{save_path}/{model_name}_{model_type}.joblib"
-    joblib.dump(model, model_file)
+    model_path = Path(save_path) / f"{model_name}_{model_type}.joblib"
+    joblib.dump(model, model_path)
+
+    print(f"✅ Saved model to: {model_path}")
+    print(f"📈 Accuracy: {acc:.3f} | CV: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
 
     return {
         'model': model,
-        'accuracy': accuracy,
-        'cv_mean': np.mean(cv),
-        'cv_std': np.std(cv),
+        'accuracy': acc,
+        'cv_mean': cv_scores.mean(),
+        'cv_std': cv_scores.std(),
         'classification_report': report,
-        'confusion_matrix': confusion,
-        'model_path': model_file
+        'confusion_matrix': matrix,
+        'model_path': str(model_path)
     }
 
-# --- Regression Model Trainer ---
+
+# --- Regression Trainer ---
 def train_regressor(X, y, model_type='random_forest', model_name='regressor', save_path='data/processed'):
-    model_map = {
-        'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
-        'gradient_boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
-        'linear_regression': LinearRegression(),
-        'ridge': Ridge(alpha=1.0),
-        'lasso': Lasso(alpha=0.1)
-    }
+    """
+    Train and evaluate a regression model.
+    """
+    if model_type not in REGRESSORS:
+        raise ValueError(f"Unsupported regressor: {model_type}. Choose from {list(REGRESSORS.keys())}")
 
-    model = model_map.get(model_type)
-    if not model:
-        raise ValueError(f"Unsupported regressor: {model_type}")
+    model = REGRESSORS[model_type]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42
-    )
-
+    print(f"🔁 Training regressor: {model_type}")
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 
+    # Evaluation
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     mae = mean_absolute_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
-    cv = cross_val_score(model, X, y, cv=5, scoring='r2')
+    cv_scores = cross_val_score(model, X, y, cv=5, scoring='r2')
 
+    # Save model
     Path(save_path).mkdir(parents=True, exist_ok=True)
-    model_file = f"{save_path}/{model_name}_{model_type}.joblib"
-    joblib.dump(model, model_file)
+    model_path = Path(save_path) / f"{model_name}_{model_type}.joblib"
+    joblib.dump(model, model_path)
+
+    print(f"✅ Saved model to: {model_path}")
+    print(f"📉 RMSE: {rmse:.2f} | MAE: {mae:.2f} | R²: {r2:.3f} | CV R²: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
 
     return {
         'model': model,
         'rmse': rmse,
         'mae': mae,
         'r2': r2,
-        'cv_mean': np.mean(cv),
-        'cv_std': np.std(cv),
-        'model_path': model_file
+        'cv_mean': cv_scores.mean(),
+        'cv_std': cv_scores.std(),
+        'model_path': str(model_path)
     }
